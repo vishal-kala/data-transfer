@@ -1,12 +1,3 @@
-CREATE OR REPLACE PROCEDURE grant_core_privileges(ENV STRING, SUFFIX STRING, USERWAREHOUSE STRING, ENABLEWIP STRING)
-  returns string not null
-  language python
-  runtime_version = '3.8'
-  packages = ('snowflake-snowpark-python')
-  handler = 'grant_core_privileges_py'
-as
-$$
-
 def exec_stmt(snowpark_session, stmt):
     try:
         if snowpark_session:
@@ -307,6 +298,3 @@ def change_mgmt_db_permission_statements(change_mgmt_db, role):
     ]
 
     return statements
-
-$$
-;

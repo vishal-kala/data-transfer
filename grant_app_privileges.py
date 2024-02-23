@@ -1,12 +1,3 @@
-CREATE OR REPLACE PROCEDURE grant_app_privileges(ENV STRING, SUFFIX STRING, USERWAREHOUSE STRING, APP_NAME STRING, SCHEMA_NAME STRING, APP_ZONES ARRAY, ENABLEWIP STRING)
-  returns string not null
-  language python
-  runtime_version = '3.8'
-  packages = ('snowflake-snowpark-python')
-  handler = 'grant_app_privileges_py'
-as
-$$
-
 def exec_stmt(snowpark_session, stmt):
     try:
         if snowpark_session:
@@ -345,6 +336,3 @@ def read_write_core_permission_statements(schema, role):
     ]
 
     return statements
-
-$$
-;
