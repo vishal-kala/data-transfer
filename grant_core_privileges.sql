@@ -28,9 +28,6 @@ def exec_stmts(snowpark_session, stmt_list):
 
 
 def grant_core_privileges_py(snowpark_session, env: str, suffix: str, userwarehouse: str, enablewip: str):
-    import logging, sys
-    logging.basicConfig(stream=sys.stdout, level=logging.DEBUG)
-
     core_policy = {
         "MGSSFCOREETL": {
             "DISCOVERY": ["READ_WRITE", "ETL"],
@@ -90,6 +87,7 @@ def grant_core_privileges_py(snowpark_session, env: str, suffix: str, userwareho
     if enablewip.lower() == 'true':
         core_policy['MGSSFCOREDATAENG'] = core_policy['MGSSFCOREETL']
 
+    # Handle Core Roles
     for role, policy in core_policy.items():
         role = f'{role}{env}'
         sf_role = role
@@ -98,17 +96,18 @@ def grant_core_privileges_py(snowpark_session, env: str, suffix: str, userwareho
 
         for zone, privs in policy.items():
             sf_database = f'{zone}_{suffix}'
-            statements.extend(zone_permission_statements(sf_database, sf_role))
+
+            # Statements applicable to all roles
+            statements.extend(all_roles_permission_statements(sf_database, sf_role))
 
             if 'ETL' in privs:
-                statements.extend(etl_permission_statements(sf_database, sf_role))
+                statements.extend(etl_role_permission_statements(sf_database, sf_role))
 
             if 'READ_ONLY' in privs:
-                statements.extend(read_permission_statements(sf_database, sf_role))
+                statements.extend(read_only_permission_statements(sf_database, sf_role))
 
             if 'READ_WRITE' in privs:
-                statements.extend(read_permission_statements(sf_database, sf_role))
-                statements.extend(write_permission_statements(sf_database, sf_role))
+                statements.extend(read_write_permission_statements(sf_database, sf_role))
 
                 if enablewip.lower() == 'true':
                     statements.extend(wip_specific_permission_statements(sf_database, sf_role))
@@ -130,74 +129,119 @@ def warehouse_permission_statements(wh, role):
     return statements
 
 
-def zone_permission_statements(db, role):
-    statements = [
-        f"grant usage on database {db} to role {role}",
-        f"grant usage on all stages in database {db} to role {role}",
-        f"grant usage on future stages in database {db} to role {role}",
-        f"grant usage on all file formats in database {db} to role {role}",
-        f"grant usage on future file formats in database {db} to role {role}",
-        f"grant usage on all procedures in database {db} to role {role}",
-        f"grant usage on future procedures in database {db} to role {role}",
-        f"grant usage on all functions in database {db} to role {role}",
-        f"grant usage on future functions in database {db} to role {role}"
-    ]
+def permission_metrics():
+    metrics = {
+        "dynamic table": {
+            "read-only": "SELECT",
+            "read-write": "SELECT, MONITOR, OPERATE"
+        },
+        "event table": {
+            "read-only": "SELECT",
+            "read-write": "SELECT, INSERT"
+        },
+        "external table": {
+            "read-only": "SELECT",
+            "read-write": "SELECT, INSERT, UPDATE, DELETE, REFERENCES"
+        },
+        "file format": {
+            "all-roles": "USAGE"
+        },
+        "function": {
+            "all-roles": "USAGE"
+        },
+        "materialized view": {
+            "read-only": "SELECT",
+            "read-write": "SELECT"
+        },
+        "model": {
+            "all-roles": "USAGE"
+        },
+        "pipe": {
+            "all-roles": "USAGE",
+            "read-write": "MONITOR, OPERATE"
+        },
+        "procedure": {
+            "all-roles": "USAGE"
+        },
+        "sequence": {
+            "all-roles": "USAGE"
+        },
+        "stage": {
+            "all-roles": "USAGE",
+            "read-only": "READ",
+            "read-write": "READ, WRITE"
+        },
+        "stream": {
+            "read-only": "SELECT",
+            "read-write": "SELECT"
+        },
+        "table": {
+            "read-only": "SELECT",
+            "read-write": "SELECT, INSERT, UPDATE, DELETE, TRUNCATE, REFERENCES"
+        },
+        "view": {
+            "read-only": "SELECT",
+            "read-write": "SELECT",
+            "etl-role": "CREATE"
+        }
+    }
+
+    return metrics
+
+
+def permission_statements(db, role, perm_type):
+    statements = []
+
+    for db_object, permissions in permission_metrics().items():
+        if perm_type in permissions:
+            statements.append(f"grant {permissions[perm_type].lower()} on all {db_object}s in database {db} to role {role}")
+            statements.append(f"grant {permissions[perm_type].lower()} on future {db_object}s in database {db} to role {role}")
 
     return statements
 
 
-def etl_permission_statements(db, role):
-    statements = [f"grant create view on all schemas in database {db} to role {role}"]
+def all_roles_permission_statements(db, role):
+    statements = []
+
+    statements.append(f"grant usage on database {db} to role {role}")
+
+    # Add Schema specific permissions separately
+    statements.append(f"grant usage on all schemas in database {db} to role {role}")
+    statements.append(f"grant usage on future schemas in database {db} to role {role}")
+
+    statements.extend(permission_statements(db, role, 'all-roles'))
 
     return statements
 
 
-def read_permission_statements(db, role):
-    statements = [
-        f"grant usage on all schemas in database {db} to role {role}",
-        f"grant usage on future schemas in database {db} to role {role}",
-        f"grant select on all tables in database {db} to role {role}",
-        f"grant select on future tables in database {db} to role {role}",
-        f"grant select on all external tables in database {db} to role {role}",
-        f"grant select on future external tables in database {db} to role {role}",
-        f"grant select on all views in database {db} to role {role}",
-        f"grant select on future views in database {db} to role {role}",
-        f"grant read on all stages in database {db} to role {role}",
-        f"grant read on future stages in database {db} to role {role}",
-        f"grant select on all streams in database {db} to role {role}",
-        f"grant select on future streams in database {db} to role {role}",
-        f"grant select on all materialized views in database {db} to role {role}",
-        f"grant select on future materialized views in database {db} to role {role}",
-        f"grant select on all dynamic tables in database {db} to role {role}",
-        f"grant select on future dynamic tables in database {db} to role {role}"
-    ]
+def etl_role_permission_statements(db, role):
+    statements = []
+
+    for db_object, permissions in permission_metrics().items():
+        if 'etl-role' in permissions:
+            statements.append(f"grant create {db_object} on all schemas in database {db} to role {role}")
+            statements.append(f"grant create {db_object} on future schemas in database {db} to role {role}")
 
     return statements
 
 
-def write_permission_statements(db, role):
-    statements = [
-        f"grant insert, update, delete, truncate, references on all tables in database {db} to role {role}",
-        f"grant insert, update, delete, truncate, references on future tables in database {db} to role {role}",
-        f"grant insert, update, delete, truncate, references on all external tables in database {db} to role {role}",
-        f"grant insert, update, delete, truncate, references on future external tables in database {db} to role {role}",
-        f"grant monitor, operate on all tasks in database {db} to role {role}",
-        f"grant monitor, operate on future tasks in database {db} to role {role}",
-        f"grant operate on all dynamic tables in database {db} to role {role}",
-        f"grant operate on future dynamic tables in database {db} to role {role}"
-    ]
+def read_only_permission_statements(db, role):
+    return permission_statements(db, role, 'read-only')
 
-    return statements
+
+def read_write_permission_statements(db, role):
+    return permission_statements(db, role, 'read-write')
 
 
 def wip_specific_permission_statements(db, role):
-    statements = [
-        f"grant create schema on database {db} to role {role}",
-        f"grant create table on all schemas in database {db} to role {role}",
-        f"grant create external table on all schemas in database {db} to role {role}",
-        f"grant create dynamic table on all schemas in database {db} to role {role}",
-        f"grant create file format on all schemas in database {db} to role {role}"
-    ]
+    statements = []
+
+    # Add Schema specific permissions separately
+    statements.append(f"grant create schema on database {db} to role {role}")
+
+    for db_object, permissions in permission_metrics().items():
+        statements.append(f"grant create {db_object} on all schemas in database {db} to role {role}")
+        statements.append(f"grant create {db_object} on future schemas in database {db} to role {role}")
 
     return statements
 
@@ -205,15 +249,17 @@ def wip_specific_permission_statements(db, role):
 def change_mgmt_db_permission_statements(change_mgmt_db, role):
     statements = [
         f"grant all on database {change_mgmt_db} to role {role}",
-        f"grant usage, monitor on all schemas in database {change_mgmt_db} to role {role}",
         f"grant all on all schemas in database {change_mgmt_db} to role {role}",
         f"grant all on all tables in database {change_mgmt_db} to role {role}",
+
+        f"grant usage, monitor on all schemas in database {change_mgmt_db} to role {role}",
+
         f"grant usage on all procedures in database {change_mgmt_db} to role {role}",
         f"grant usage on future procedures in database {change_mgmt_db} to role {role}"
     ]
 
     return statements
 
+
 $$
 ;
-
